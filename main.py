@@ -77,7 +77,7 @@ def auto_loop():
    if get_session()[0]!="SLEEP": scan_and_post_sync()
    time.sleep(900)
   except: time.sleep(60)
-   flask_app = Flask('')
+flask_app = Flask('')
 @flask_app.route('/')
 def home():
     return "Bot is Alive!"
