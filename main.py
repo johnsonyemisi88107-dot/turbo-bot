@@ -79,9 +79,15 @@ def auto_loop():
   except: time.sleep(60)
    flask_app = Flask('')
 @flask_app.route('/')
-def home(): return "Bot is Alive!"
-def run_flask(): flask_app.run(host='0.0.0.0',port=8080)
-def keep_alive(): threading.Thread(target=run_flask).start()
+def home():
+    return "Bot is Alive!"
+
+def run_flask():
+    flask_app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    threading.Thread(target=run_flask).start()
+
 app=ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start",start_cmd))
 app.add_handler(CommandHandler("scan",scan_cmd))
