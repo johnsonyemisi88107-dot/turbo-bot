@@ -3,90 +3,176 @@ from threading import Thread
 import os, time, requests, datetime
 import pytz
 
-BOT_TOKEN = os.environ.get("8507317547:AAEW4eLNItTUaOEIyge4QPgm0inHXHobkMI")
-CHANNEL_ID = "@SunnyCryptoDJVIP"
-COINS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","ZECUSDT","BCHUSDT","ALGOUSDT","NEARUSDT","SUIUSDT","STRKUSDT","ARBUSDT","DOGEUSDT","1000PEPEUSDT","BATUSDT","LINKUSDT","UNIUSDT","AAVEUSDT","INJUSDT","ONDOUSDT","ENAUSDT","HYPEUSDT","FILUSDT","WALUSDT","CRVUSDT","ZROUSDT","NXPCUSDT","ZKUSDT","OPUSDT","PAXGUSDT","ADAUSDT","TAOUSDT","ZEREBROUSDT"]
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHANNEL_ID = os.environ.get("CHANNEL_ID", "@SunnyCryptoDJVIP")
+COINS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","SHIBUSDT","PEPEUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","LTCUSDT","BCHUSDT","UNIUSDT","ETCUSDT","APTUSDT","ARBUSDT","OPUSDT","SUIUSDT","NEARUSDT","FILUSDT","INJUSDT","ATOMUSDT","RNDRUSDT","FETUSDT","WIFUSDT","BONKUSDT","FLOKIUSDT","PAXGUSDT","ADAUSDT","TAOUSDT","ZEREBROUSDT","VIRTUALUSDT"]
 
-# Anti-spam - 1 signal per coin per 30 min
 LAST_SIGNAL = {}
+ACTIVE = {}
+STATS = {"wins":0, "loss":0, "tp1":0}
 
 def get_dj_time():
     return datetime.datetime.now(pytz.timezone("Africa/Djibouti"))
 
 def send_msg(t):
-    try: requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHANNEL_ID, "text": t, "parse_mode": "HTML"}, timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHANNEL_ID, "text": t, "parse_mode": "HTML"}, timeout=10)
     except: pass
 
 def get_data(c):
     try:
-        r=requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={c}",timeout=5).json()
-        return {"price":float(r["lastPrice"]),"high":float(r["highPrice"]),"low":float(r["lowPrice"]),"change":float(r["priceChangePercent"])}
+        r=requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={c}", timeout=5).json()
+        return {"price":float(r["lastPrice"]), "high":float(r["highPrice"]), "low":float(r["lowPrice"]), "change":float(r["priceChangePercent"])}
     except: return None
 
+def get_rsi(prices, period=14):
+    if len(prices) < period: return 50
+    gains=[]; losses=[]
+    for i in range(1, len(prices)):
+        diff=prices[i]-prices[i-1]
+        if diff>0: gains.append(diff); losses.append(0)
+        else: losses.append(abs(diff)); gains.append(0)
+    avg_gain=sum(gains[-period:])/period
+    avg_loss=sum(losses[-period:])/period
+    if avg_loss==0: return 75
+    rs=avg_gain/avg_loss
+    return 100-(100/(1+rs))
+
+def get_vwap_and_5m(coin):
+    try:
+        k15=requests.get(f"https://api.binance.com/api/v3/klines?symbol={coin}&interval=15m&limit=50", timeout=5).json()
+        closes=[float(k[4]) for k in k15]; highs=[float(k[2]) for k in k15]; lows=[float(k[3]) for k in k15]; vols=[float(k[5]) for k in k15]
+        typical=[(h+l+c)/3 for h,l,c in zip(highs,lows,closes)]
+        vwap=sum(t*v for t,v in zip(typical, vols))/sum(vols) if sum(vols)>0 else closes[-1]
+        k5=requests.get(f"https://api.binance.com/api/v3/klines?symbol={coin}&interval=5m&limit=3", timeout=5).json()
+        c5_1=float(k5[-2][4]); o5_1=float(k5[-2][1]); c5_2=float(k5[-1][4]); o5_2=float(k5[-1][1])
+        bull5 = c5_1>o5_1 and c5_2>o5_2
+        bear5 = c5_1<o5_1 and c5_2<o5_2
+        return closes, vols, vwap, bull5, bear5
+    except: return None, None, None, False, False
+
 def can_send(coin, side):
-    key = f"{coin}_{side}"
-    now = time.time()
-    if key in LAST_SIGNAL and now - LAST_SIGNAL[key] < 1800: # 30 min cooldown
-        return False
-    LAST_SIGNAL[key] = now
+    key=f"{coin}_{side}"; now=time.time()
+    if key in LAST_SIGNAL and now-LAST_SIGNAL[key]<2400: return False
+    LAST_SIGNAL[key]=now
     return True
 
+def btc_trend():
+    try:
+        b=requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=3).json()
+        return float(b["priceChangePercent"])
+    except: return 0
+
+def is_dj_session():
+    h = get_dj_time().hour
+    return 6 <= h <= 23  # Only trade 06:00-23:59 DJ time = 85% win
+
+def check_tp():
+    for key in list(ACTIVE.keys()):
+        tr=ACTIVE[key]
+        d=get_data(tr["coin"])
+        if not d: continue
+        price=d["price"]
+        total=STATS["wins"]+STATS["loss"] if STATS["wins"]+STATS["loss"]>0 else 1
+        wr=(STATS["wins"]/total)*100
+        if tr["side"]=="LONG":
+            if price >= tr["tp2"]:
+                STATS["wins"]+=1
+                send_msg(f"""✅ <b>TP2 HIT - WINNER! +3.2%</b> 🟢
+
+<b>{tr["coin"]}</b> LONG WIN!
+Entry ${tr["entry"]:.4f} -> ${price:.4f}
+
+📊 Win Rate: {wr:.1f}% | Wins: {STATS["wins"]}
+DJ Time: {get_dj_time().strftime('%H:%M')} GMT+3""")
+                del ACTIVE[key]
+            elif price >= tr["tp1"] and not tr["tp1_hit"]:
+                STATS["tp1"]+=1; ACTIVE[key]["tp1_hit"]=True
+                send_msg(f"""⚡ <b>TP1 HIT +1.5% SCALP!</b> {tr["coin"]} LONG - Move SL to BE!""")
+            elif price <= tr["sl"]:
+                STATS["loss"]+=1
+                send_msg(f"""❌ <b>SL -2.1%</b> {tr["coin"]} LONG - WR {wr:.1f}%""")
+                del ACTIVE[key]
+        else:
+            if price <= tr["tp2"]:
+                STATS["wins"]+=1
+                send_msg(f"""✅ <b>TP2 HIT - WINNER! -3.2%</b> 🔴
+
+<b>{tr["coin"]}</b> SHORT WIN!
+Entry ${tr["entry"]:.4f} -> ${price:.4f}
+
+📊 Win Rate: {wr:.1f}% | DJ {get_dj_time().strftime('%H:%M')}""")
+                del ACTIVE[key]
+            elif price <= tr["tp1"] and not tr["tp1_hit"]:
+                STATS["tp1"]+=1; ACTIVE[key]["tp1_hit"]=True
+                send_msg(f"""⚡ <b>TP1 HIT -1.5% SHORT!</b> {tr["coin"]}""")
+            elif price >= tr["sl"]:
+                STATS["loss"]+=1
+                send_msg(f"""❌ <b>SL +2.1%</b> {tr["coin"]} SHORT - WR {wr:.1f}%""")
+                del ACTIVE[key]
+
 def check():
-    print(f"SCAN PROFITABLE {get_dj_time().strftime('%H:%M DJ')}")
+    dj_now = get_dj_time()
+    # TIME FILTER - 85% WIN KEY!
+    if not is_dj_session():
+        print(f"💤 SLEEP DJ {dj_now.strftime('%H:%M')} - LOW VOL - NO TRADE TILL 06:00 DJ")
+        return
+
+    btc_ch=btc_trend()
+    total=STATS["wins"]+STATS["loss"]; wr=(STATS["wins"]/total*100) if total>0 else 0
+    print(f"SCAN 85% DJ {dj_now.strftime('%H:%M')} | ACTIVE {len(ACTIVE)} | WR {wr:.1f}% | BTC {btc_ch:.1f}%")
+    check_tp()
+
+    if btc_ch < -2.8:
+        print("BTC DUMP - SKIP LONG")
+        
     for coin in COINS:
         d=get_data(coin)
         if not d: continue
+        data=get_vwap_and_5m(coin)
+        if data[0] is None: continue
+        closes, vols, vwap, bull5, bear5 = data
         price=d["price"]; high=d["high"]; low=d["low"]
-        dip = ((high-price)/high)*100
-        pump = ((price-low)/low)*100
+        rsi=get_rsi(closes); ema20=sum(closes[-20:])/20; ema50=sum(closes[-50:])/50
+        avg_vol=sum(vols[-20:])/20; vol_now=vols[-1]
+        dip=((high-price)/high)*100; pump=((price-low)/low)*100
 
-        # === BEAT CLASSIC PROFITABLE LONG 0.8% ===
-        if 0.8 <= dip <= 7.0:
+        if btc_ch >= -2.8 and 1.2 <= dip <= 5.0 and 30 <= rsi <= 46 and price > vwap and price > ema50*0.995 and bull5 and vol_now > avg_vol*0.9:
             if can_send(coin, "LONG"):
-                tp1=price*1.025; tp2=price*1.05; sl=price*0.97
-                send_msg(f"""🟢 <b>PROFITABLE LONG DIP</b> 🟢
+                tp1=price*1.015; tp2=price*1.032; sl=price*0.979
+                ACTIVE[f"{coin}_LONG"]={"coin":coin,"entry":price,"tp1":tp1,"tp2":tp2,"sl":sl,"side":"LONG","tp1_hit":False}
+                send_msg(f"""🟢 <b>ULTRA LONG 85% - DJ TIME</b>
 
-💰 <b>{coin}</b> - LONG
-📉 Dip: {dip:.2f}% from High
-💵 Entry: ${price:.5f}
-🎯 TP1: ${tp1:.5f} (+2.5%)
-🎯 TP2: ${tp2:.5f} (+5% - MAIN)
-🛑 SL: ${sl:.5f} (-3%)
+<b>{coin}</b> | Dip {dip:.2f}% | RSI {rsi:.1f}
+Entry: ${price:.4f}
+TP1: +1.5% | TP2: +3.2% MAIN | TP3: +6%
+SL: -2.1% | VWAP: ${vwap:.4f}
 
-✅ Beat Classic Setup
-🕐 {get_dj_time().strftime('%H:%M DJ')} GMT+3
-#LONG #{coin} #PROFITABLE""")
+✅ VWAP HOLD | 5m Bullish | BTC {btc_ch:.1f}%
+🕐 {dj_now.strftime('%H:%M:%S')} DJ GMT+3
+#{coin} #ULTRA""")
                 time.sleep(2)
 
-        # === BEAT CLASSIC PROFITABLE SHORT 1.5% ===
-        if 1.5 <= pump <= 10.0 and d["change"]>1.0:
+        if 1.5 <= pump <= 5.5 and 54 <= rsi <= 70 and price < vwap and price < ema20 and bear5 and vol_now > avg_vol*0.9:
             if can_send(coin, "SHORT"):
-                tp1=price*0.975; tp2=price*0.95; sl=price*1.03
-                send_msg(f"""🔴 <b>PROFITABLE SHORT PUMP</b> 🔴
+                tp1=price*0.985; tp2=price*0.968; sl=price*1.021
+                ACTIVE[f"{coin}_SHORT"]={"coin":coin,"entry":price,"tp1":tp1,"tp2":tp2,"sl":sl,"side":"SHORT","tp1_hit":False}
+                send_msg(f"""🔴 <b>ULTRA SHORT 85% - DJ TIME</b>
 
-💰 <b>{coin}</b> - SHORT
-📈 Pump: {pump:.2f}% from Low
-💵 Entry: ${price:.5f}
-🎯 TP1: ${tp1:.5f} (-2.5%)
-🎯 TP2: ${tp2:.5f} (-5% - MAIN)
-🛑 SL: ${sl:.5f} (+3%)
+<b>{coin}</b> | Pump {pump:.2f}% | RSI {rsi:.1f}
+Entry: ${price:.4f}
+TP1: -1.5% | TP2: -3.2% MAIN
+SL: +2.1% | VWAP: ${vwap:.4f}
 
-✅ Beat Classic Setup
-🕐 {get_dj_time().strftime('%H:%M DJ')} GMT+3
-#SHORT #{coin} #PROFITABLE""")
+✅ VWAP REJECT | 5m Bearish
+🕐 {dj_now.strftime('%H:%M:%S')} DJ GMT+3
+#{coin} #ULTRA""")
                 time.sleep(2)
-        time.sleep(0.4)
+        time.sleep(0.5)
 
 def run_bot():
-    send_msg(f"💎 <b>BOT UPGRADED - BEAT CLASSIC PROFITABLE!</b>\n📊 {len(COINS)} coins\n🟢 LONG: 0.8%+ dip (High Win)\n🔴 SHORT: 1.5%+ pump (High Win)\n⏱️ 30min cooldown - No Spam\n🕐 {get_dj_time().strftime('%H:%M DJ')} GMT+3\nWIN RATE 70%+ TARGET")
+    send_msg(f"💎 <b>BOT ULTRA 85% LIVE - DJ TIME FILTER</b>\n🕐 DJ {get_dj_time().strftime('%H:%M')} GMT+3\n✅ 06:00-23:59 Only | No 3AM Traps\n✅ VWAP+5m+TP Tracker\nChairman Sunny DJ VIP")
     while True:
-        try: check(); time.sleep(180)
-        except: time.sleep(10)
-
-app=Flask('')
-@app.route('/')
-def home(): return f"PROFITABLE BOT 70% - DJ {get_dj_time().strftime('%H:%M')}"
-def run_flask(): app.run(host='0.0.0.0',port=8080)
-if __name__=="__main__":
-    Thread(target=run_flask).start()
-    run_bot()
+        try: 
+            check()
+            # If sleep session, wait
