@@ -200,5 +200,5 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    Thread(target=run_flask).start()
-    run_bot()
+ 203    Thread(target=run_bot).start()
+204    run_flask()   
