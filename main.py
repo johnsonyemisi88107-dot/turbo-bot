@@ -4,7 +4,7 @@ import os, time, requests, datetime
 import pytz
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHANNEL_ID = os.environ.get("CHANNEL_ID", "@SunnyCryptoDJVIP")
+CHANNEL_ID = os.viron.get("CHANNEL_ID", "-1004491702289")
 COINS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","SHIBUSDT","PEPEUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","LTCUSDT","BCHUSDT","UNIUSDT","ETCUSDT","APTUSDT","ARBUSDT","OPUSDT","SUIUSDT","NEARUSDT","FILUSDT","INJUSDT","ATOMUSDT","RNDRUSDT","FETUSDT","WIFUSDT","BONKUSDT","FLOKIUSDT","PAXGUSDT","ADAUSDT","TAOUSDT","ZEREBROUSDT","VIRTUALUSDT"]
 
 LAST_SIGNAL = {}
@@ -16,11 +16,19 @@ def get_dj_time():
 
 def send_msg(t):
     try:
+        print(f"SENDING TO {CHANNEL_ID}")
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {"chat_id": CHANNEL_ID, "text": t, "parse_mode": "HTML"}
-        requests.post(url, data=data, timeout=10)
-    except:
-        pass
+        r = requests.post(url, data=data, timeout=15)
+        print(f"RESULT: {r.text}")
+    except Exception as e:
+        print(f"ERROR: {e}")
+    
+        
+        
+        
+    
+        
 
 def get_data(c):
     try:
