@@ -9,17 +9,18 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 app = Flask(__name__)
 
 # --- CONFIG FROM RENDER ENV ---
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("CHAT_ID")
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# 35 COINS INCLUDING ZEC + HYPE
+# 35 COINS INCLUDING ZEC + HYPE + MAGMA
 COINS = [
-    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT","DOGEUSDT",
-    "SHIBUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","MATICUSDT","LTCUSDT","BCHUSDT",
-    "UNIUSDT","ATOMUSDT","ETCUSDT","XLMUSDT","FILUSDT","TRXUSDT",
-    "NEARUSDT","APTUSDT","ARBUSDT","OPUSDT","PEPEUSDT","SUIUSDT","SEIUSDT",
-    "WIFUSDT","BONKUSDT","FLOKIUSDT","ZECUSDT","HYPEUSDT","MAGMAUSDT",
-    "ENAUSDT","TAOUSDT"
+    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
+    "DOGEUSDT","ADAUSDT","AVAXUSDT","DOTUSDT","LINKUSDT",
+    "SHIBUSDT","UNIUSDT","ATOMUSDT","ETCUSDT","XLMUSDT",
+    "NEARUSDT","APTUSDT","ARBUSDT","OPUSDT","WIFUSDT",
+    "BONKUSDT","FLOKIUSDT","PEPEUSDT","SUIUSDT","RENDERUSDT",
+    "ENAUSDT","TAOUSDT","ZECUSDT","HYPEUSDT","MAGMAUSDT",
+    "INJUSDT","FETUSDT","WLDUSDT","ARUSDT","LDOUSDT"
 ]
 
 last_signal_time = {}
@@ -36,225 +37,140 @@ def send_msg(text):
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         data = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
         requests.post(url, data=data, timeout=10)
-        print(f"Sent: {text[:50]}")
     except Exception as e:
-        print(f"Send error: {e}")
+        print(f"Send error {e}")
 
-def get_price(coin):
+def get_price(symbol):
     try:
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={coin}"
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
         r = requests.get(url, timeout=5).json()
         return float(r['price'])
     except:
         return None
 
-def get_24h_stats(coin):
+def get_24h_stats(symbol):
     try:
-        url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={coin}"
+        url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
         r = requests.get(url, timeout=5).json()
         return {
-            "high": float(r['highPrice']),
-            "low": float(r['lowPrice']),
-            "change": float(r['priceChangePercent'])
+            'high': float(r['highPrice']),
+            'low': float(r['lowPrice']),
+            'change': float(r['priceChangePercent'])
         }
     except:
         return None
 
+# --- FAST SCANNING ALL 35 COINS ---
 def scanning_loop():
     print("Scanning loop started - 35 coins")
-    send_msg(f"✅ SUNNY VIP BOT STARTED - LIVE {get_dj_time()}\n📡 UptimeRobot: Active\n💰 Scanning {len(COINS)} coins with LIMIT strategy!")
+    send_msg(f"✅ SUNNY VIP BOT STARTED - LIVE {get_dj_time()}\n📡 UptimeRobot: Active\n💰 Scanning 35 coins with LIMIT strategy!\nCoins: BTC, ETH, BNB, SOL, ZEC, HYPE, MAGMA + 28 more!")
+    count = 0
     while True:
+        count += 1
+        found_signals = 0
         for coin in COINS:
             try:
                 price = get_price(coin)
                 stats = get_24h_stats(coin)
                 if not price or not stats:
+                    print(f"Skip {coin} no data")
                     continue
-
-                # Support / Resistance Logic (Simple but powerful)
                 support = stats['low']
                 resistance = stats['high']
                 range_size = resistance - support
                 if range_size == 0:
                     continue
-
                 position = (price - support) / range_size
-
+                change = stats['change']
+                print(f"[{count}] Scanning {coin} Pos {position:.2f} Change {change:.2f}%")
                 signal = None
-                # Near support -> LONG LIMIT
-                if position < 0.15 and stats['change'] < -2:
-                    # Cooldown 1 hour per coin
-                    if coin in last_signal_time and time.time() - last_signal_time[coin] < 3600:
-                        continue
+                cooldown_ok = coin not in last_signal_time or time.time() - last_signal_time[coin] > 1800
+                if position < 0.25 and change < -1 and cooldown_ok:
                     entry = price
-                    sl = entry * 0.97  # -3%
+                    sl = entry * 0.97
                     tp1 = entry * 1.02
                     tp2 = entry * 1.04
                     tp3 = entry * 1.06
                     signal = f"""🚀 <b>{coin} LONG SIGNAL 🔥</b>
 
 📊 <b>Order Type: LIMIT ✅ BEST FOR TRADING</b>
-
 💰 <b>Entry:</b> LIMIT at {entry:.5f}
-   Set Order Type -> Limit -> Price {entry:.5f}
+🛡️ <b>Stop Loss:</b> {sl:.5f} (Conditional Market)
+🎯 <b>TP1:</b> {tp1:.5f} (+2%)
+🎯 <b>TP2:</b> {tp2:.5f} (+4%)
+🎯 <b>TP3:</b> {tp3:.5f} (+6%)
 
-🛡️ <b>Stop Loss:</b> {sl:.5f}
-   Set as: Conditional Market
-
-🎯 <b>Take Profits:</b>
-   TP1: {tp1:.5f} (+2%)
-   TP2: {tp2:.5f} (+4%)
-   TP3: {tp3:.5f} (+6%)
-
-⏰ Time: {get_dj_time()}
-📈 Reason: Price at STRONG SUPPORT + Dip - Oversold bounce expected
-⚡ Leverage: 10x Cross | Margin: 5-10% of balance
-💡 Fees: Limit = 0.02% (cheap!)
-
-⚠️ Use isolated TP/SL!
+⏰ {get_dj_time()}
+📈 Reason: At SUPPORT {position*100:.0f}% of range + Dip {change:.1f}% -> Bounce expected
+⚡ Leverage: 10x Cross | Scanning: 35 coins LIVE
+💡 How: Futures -> Order Type LIMIT -> {entry:.5f} + Set SL/TP as Conditional
 """
-                # Near resistance -> SHORT LIMIT
-                elif position > 0.85 and stats['change'] > 2:
-                    if coin in last_signal_time and time.time() - last_signal_time[coin] < 3600:
-                        continue
+                elif position > 0.75 and change > 1 and cooldown_ok:
                     entry = price
-                    sl = entry * 1.03  # +3%
+                    sl = entry * 1.03
                     tp1 = entry * 0.98
                     tp2 = entry * 0.96
                     tp3 = entry * 0.94
                     signal = f"""📉 <b>{coin} SHORT SIGNAL 🔥</b>
 
 📊 <b>Order Type: LIMIT ✅ BEST FOR TRADING</b>
-
 💰 <b>Entry:</b> LIMIT at {entry:.5f}
-   Set Order Type -> Limit -> Price {entry:.5f}
+🛡️ <b>Stop Loss:</b> {sl:.5f} (Conditional Market)
+🎯 <b>TP1:</b> {tp1:.5f} (-2%)
+🎯 <b>TP2:</b> {tp2:.5f} (-4%)
+🎯 <b>TP3:</b> {tp3:.5f} (-6%)
 
-🛡️ <b>Stop Loss:</b> {sl:.5f}
-   Set as: Conditional Market
-
-🎯 <b>Take Profits:</b>
-   TP1: {tp1:.5f} (-2%)
-   TP2: {tp2:.5f} (-4%)
-   TP3: {tp3:.5f} (-6%)
-
-⏰ Time: {get_dj_time()}
-📉 Reason: Price at STRONG RESISTANCE + Pump - Drop expected
-⚡ Leverage: 10x Cross | Margin: 5-10% of balance
-💡 Fees: Limit = 0.02% (cheap!)
-
-⚠️ Use isolated TP/SL!
+⏰ {get_dj_time()}
+📉 Reason: At RESISTANCE {position*100:.0f}% of range + Pump {change:.1f}% -> Drop expected
+⚡ Leverage: 10x Cross | Scanning: 35 coins LIVE
+💡 How: Futures -> Order Type LIMIT -> {entry:.5f} + Set SL/TP as Conditional
 """
-
                 if signal:
                     send_msg(signal)
                     last_signal_time[coin] = time.time()
+                    found_signals += 1
+                    print(f"*** SIGNAL SENT {coin} ***")
                     time.sleep(5)
-
-                time.sleep(1)
+                time.sleep(0.5)
             except Exception as e:
                 print(f"Error {coin}: {e}")
-                time.sleep(1)
-        print(f"Full scan done {get_dj_time()} - Sleeping 60 sec")
-        time.sleep(60)
+                time.sleep(0.5)
+        print(f"--- Full scan #{count} done {get_dj_time()} Found {found_signals} signals --- Sleeping 120 sec")
+        time.sleep(120)
 
-# --- TELEGRAM COMMANDS /start /trade ---
+# --- TELEGRAM COMMANDS ---
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"👋 Welcome to SUNNY VIP Crypto PREMIUM 🔥\n\n"
-        f"✅ Bot LIVE - {get_dj_time()}\n"
-        f"📡 Scanning {len(COINS)} coins 24/7\n\n"
-        f"Commands:\n"
-        f"/start - This message\n"
-        f"/trade - Force latest signal 🚀\n"
-        f"/status - Check bot status ✅\n"
-        f"/help - How to trade\n\n"
-        f"💰 Order Type: Always use LIMIT for entry!\n"
-        f"Channel signals come automatically!"
-    )
+    await update.message.reply_text(f"✅ Bot LIVE - {get_dj_time()}\n📡 Scanning 35 coins 24/7\nCommands: /start /trade /status /help\nOrder Type: Always use LIMIT for entry!")
 
 async def trade_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔍 Scanning {len(COINS)} coins for LIMIT setup... {get_dj_time()}")
-    # Send force signal
-    price = get_price("BTCUSDT")
-    msg = f"""🚀 <b>FORCE ACTIVE - Manual Trade Request</b>
+    try:
+        price = get_price("BTCUSDT")
+        if not price:
+            price = 108500.0
+        msg = f"""🚀 <b>FORCE ACTIVE - Manual Trade Request</b>
 
 💰 BTCUSDT Example LIMIT Trade:
-Entry: LIMIT at {price}
+Entry: LIMIT at {price:.2f}
 
 📊 Order Type: LIMIT ✅ (Lowest fees)
-🛡️ SL: Conditional Market
-🎯 TP: Conditional Limit
+🛡️ SL: Conditional Market at {price*0.97:.2f} (-3%)
+🎯 TP: Conditional Limit at {price*1.03:.2f} (+3%)
 
 ⏰ {get_dj_time()}
-✅ Bot is LIVE and scanning! Real signals post automatically when 85%+ setup found!
+✅ Bot is LIVE and scanning 35 coins! Real signals post automatically when setup found!
+
+💡 How to place:
+1. Futures -> Order Type LIMIT -> {price:.2f}
+2. Set SL {price*0.97:.2f} TP {price*1.03:.2f} as Conditional
 """
-    send_msg(msg)
-    await update.message.reply_text("✅ Test signal sent to channel! Check SUNNY VIP channel!")
+        send_msg(msg)
+        await update.message.reply_text("✅ Test LIMIT signal sent to channel! Check SUNNY VIP channel! 🚀")
+    except Exception as e:
+        await update.message.reply_text(f"Bot busy scanning, try again! {e}")
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"✅ BOT STATUS: LIVE\n"
-        f"⏰ {get_dj_time()}\n"
-        f"📡 Render: Active\n"
-        f"📡 UptimeRobot: Active (5 min ping)\n"
-        f"💰 Coins: {len(COINS)} including ZEC + HYPE + MAGMA\n"
-        f"📊 Strategy: LIMIT Order (Best)\n"
-        f"📢 Channel: {CHAT_ID}\n"
-        f"🔥 Last scan: OK"
-    )
+    await update.message.reply_text(f"📊 STATUS LIVE\n⏰ {get_dj_time()}\n💰 Coins: {len(COINS)}\n📡 Scanning every 2 min\n✅ UptimeRobot: Active\nLast signals: {len(last_signal_time)} sent today")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"🛠 <b>HOW TO TRADE WITH LIMIT (BEST)</b>\n\n"
-        f"1. Signal says: Entry LIMIT at 0.485\n"
-        f"2. Open Binance Futures\n"
-        f"3. Order Type -> Change Market to Limit\n"
-        f"4. Price -> Type 0.485\n"
-        f"5. Check TP/SL box -> Set SL and TP as Conditional\n"
-        f"6. Buy/Long or Sell/Short\n\n"
-        f"Why LIMIT? Lower fees 0.02% + Better price + No slippage!\n"
-        f"Commands: /start /trade /status"
-    )
-
-async def run_telegram():
-    if not BOT_TOKEN:
-        print("No BOT_TOKEN, commands disabled")
-        return
-    try:
-        app_tg = Application.builder().token(BOT_TOKEN).build()
-        app_tg.add_handler(CommandHandler("start", start_cmd))
-        app_tg.add_handler(CommandHandler("trade", trade_cmd))
-        app_tg.add_handler(CommandHandler("status", status_cmd))
-        app_tg.add_handler(CommandHandler("help", help_cmd))
-        print("Telegram commands /start /trade active!")
-        await app_tg.initialize()
-        await app_tg.start()
-        await app_tg.updater.start_polling()
-        # Keep running
-        while True:
-            await asyncio.sleep(3600)
-    except Exception as e:
-        print(f"Telegram bot error: {e}")
-
-def run_async_bot():
-    try:
-        asyncio.run(run_telegram())
-    except Exception as e:
-        print(f"Async error: {e}")
-
-@app.route('/')
-def home():
-    return f"SUNNY VIP BOT LIVE - {get_dj_time()} - {len(COINS)} coins - LIMIT Strategy - <a href='https://api.binance.com/api/v3/ping'>Binance OK</a>"
-
-@app.route('/health')
-def health():
-    return "OK"
-
-if __name__ == "__main__":
-    # Start Telegram commands in background thread
-    Thread(target=run_async_bot, daemon=True).start()
-    # Start scanning loop in background thread
-    Thread(target=scanning_loop, daemon=True).start()
-    # Start Flask web server (for Render + UptimeRobot)
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    await update.message.reply_text("📚 HOW TO TRADE LIMIT SIGNALS:\n1. Copy Entry Price\n2. Binance Futures -> LIMIT order\n3. Set SL as Conditional Market\n4. Set TP as Conditional Limit\n5. Leverage 10x Cross\nAlways use LIMIT - Low fees + No sl
