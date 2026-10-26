@@ -1,89 +1,95 @@
-import os,time,requests,pytz
-from datetime import datetime
-from threading import Thread
-from flask import Flask
+import os, time, requests, datetime, pytz
+from binance.client import Client
 
-app=Flask(__name__)
-BOT=os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT=os.environ.get("TELEGRAM_CHAT_ID")
+# CONFIG
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+DJ_TZ = pytz.timezone('Africa/Djibouti')
 
-COINS=["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","AVAXUSDT","DOTUSDT","LINKUSDT","SHIBUSDT","UNIUSDT","ATOMUSDT","ETCUSDT","XLMUSDT","NEARUSDT","APTUSDT","ARBUSDT","OPUSDT","WIFUSDT","BONKUSDT","FLOKIUSDT","PEPEUSDT","SUIUSDT","RENDERUSDT","ENAUSDT","TAOUSDT","ZECUSDT","HYPEUSDT","MAGMAUSDT","INJUSDT","FETUSDT","WLDUSDT","ARUSDT","LDOUSDT"]
+COINS = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT","DOGEUSDT","ADAUSDT","AVAXUSDT","SHIBUSDT","DOTUSDT","LINKUSDT","TRXUSDT","MATICUSDT","LTCUSDT","BCHUSDT","NEARUSDT","UNIUSDT","PEPEUSDT","ETCUSDT","XLMUSDT","HBARUSDT","APTUSDT","ARBUSDT","FILUSDT","OPUSDT","ATOMUSDT","INJUSDT","STXUSDT","RNDRUSDT","SUIUSDT","TIAUSDT","SEIUSDT","JUPUSDT","WIFUSDT","BONKUSDT"]
 
-TZ=pytz.timezone("Africa/Djibouti")
+scanned = 0
+sent_today = set()
 
-def dj():
-    return datetime.now(TZ).strftime("%H:%M DJ %d/%m")
-
-def send(t):
+def send_msg(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": CHANNEL_ID, "text": text, "parse_mode": "HTML"}
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT}/sendMessage",data={"chat_id":CHAT,"text":t},timeout=10)
+        requests.post(url, json=data, timeout=10)
     except: pass
 
-def price(s):
+def get_data(symbol):
     try:
-        return float(requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={s}",timeout=5).json()['price'])
-    except: return 0
+        client = Client()
+        klines = client.get_klines(symbol=symbol, interval=Client.KLINE_INTERVAL_1DAY, limit=1)
+        hi = float(klines[0][2])
+        lo = float(klines[0][3])
+        price = float(klines[0][4])
+        rng = hi - lo
+        if rng == 0: return None
+        pos = (price - lo) / rng
+        return price, hi, lo, pos
+    except:
+        return None
 
-def r24(s):
+# START MESSAGE
+now = datetime.datetime.now(DJ_TZ).strftime("%H:%M DJ %d/%m")
+send_msg(f"🚀 <b>SUNNY VIP V3.1 BREAKOUT STARTED</b>\n⏰ {now}\n💎 35 Coins LIVE\n🎯 Filter 40/60 + Entry -2%/+2% + SL 3%\n🔥 PREMIUM MODE")
+
+print(f"V3.1 40/60 STARTED {now}")
+
+while True:
     try:
-        r=requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={s}",timeout=5).json()
-        return float(r['highPrice']),float(r['lowPrice'])
-    except: return None
-
-def loop():
-    send(f"✅ SUNNY VIP V3 BREAKOUT STARTED\n⏰ {dj()}\n📊 35 Coins LIVE\n🎯 Entry -2% Below LOW / +2% Above HIGH\n💓 Heartbeat Every 1 Hour\n💎 PREMIUM MODE")
-    c=0
-    while True:
-        c+=1
-        if c % 20 == 0:
-            send(f"💓 V3 ALIVE {dj()}\n📊 Scanned {c*35} coins\n🎯 Waiting for -2% / +2% Breakout\n💎 SUNNY VIP V3")
-
+        now_dj = datetime.datetime.now(DJ_TZ)
+        time_str = now_dj.strftime("%H:%M DJ %d/%m")
+        
         for coin in COINS:
-            try:
-                p=price(coin)
-                d=r24(coin)
-                if not d: continue
-                hi,lo=d
-                rng=hi-lo
-                if rng==0: continue
-                pos=(p-lo)/rng
-                filled=int(pos*10)
-                b="█"*filled+"░"*(10-filled)
-                print(f"[{c}] {coin} {pos*100:.0f}% {b}",flush=True)
+            data = get_data(coin)
+            if not data: continue
+            price, hi, lo, pos = data
+            scanned += 1
+            
+            # VISUAL
+            bar = "█" * int(pos*10) + "░" * (10-int(pos*10))
+            print(f"[{scanned}] {coin} {pos*100:.0f}% {bar}")
 
-                # === YOUR REQUEST: LONG FROM -2% BELOW LOW ===
-                if pos < 0.25:
-                    entry = lo * 0.98      # -2% BELOW LOW
-                    sl = entry * 0.97      # -3% SL
-                    tp1 = hi * 1.02        # +2% ABOVE HIGH (YOUR REQUEST!)
-                    tp2 = hi * 1.04        # +4% ABOVE HIGH
-                    tp3 = hi * 1.07        # +7% Runner
+            # V3.1 40/60 LOGIC
+            signal = None
+            if pos < 0.40 and f"{coin}_LONG" not in sent_today:
+                entry = lo * 0.98
+                sl = entry * 0.97
+                tp1 = hi * 1.02
+                tp2 = hi * 1.04
+                tp3 = hi * 1.07
+                signal = f"🟢 <b>LONG BREAKOUT #{coin}</b>\n\n📊 Position: {pos*100:.0f}% Bottom 40%\n📍 Entry: {entry:.4f} (-2% Below LOW)\n🛑 SL: {sl:.4f} (-3%)\n\n🎯 TP1: {tp1:.4f} (+2% Above HIGH)\n🎯 TP2: {tp2:.4f} (+4%)\n🎯 TP3: {tp3:.4f} (+7%)\n\n💎 SUNNY VIP V3.1"
+                sent_today.add(f"{coin}_LONG")
 
-                    msg=f"🟢 LONG BREAKOUT #{coin}\n\n📍 Entry: {entry:.4f}\n   ↳ -2% Below 24h LOW ({lo:.4f})\n🛑 SL: {sl:.4f} (-3%)\n\n🎯 TP1: {tp1:.4f} (+2% Above HIGH)\n🎯 TP2: {tp2:.4f} (+4% Above HIGH)\n🎯 TP3: {tp3:.4f} (+7% Runner)\n\n📊 Context:\nLOW: {lo:.4f} | HIGH: {hi:.4f}\nNow: {p:.4f} [{b}] {pos*100:.0f}% BOTTOM\n💡 Liquidity Grab Setup!\n\n⏰ {dj()}\n💎 SUNNY VIP V3"
-                    send(msg)
-                    time.sleep(20)
+            elif pos > 0.60 and f"{coin}_SHORT" not in sent_today:
+                entry = hi * 1.02
+                sl = entry * 1.03
+                tp1 = lo * 0.98
+                tp2 = lo * 0.96
+                tp3 = lo * 0.93
+                signal = f"🔴 <b>SHORT BREAKOUT #{coin}</b>\n\n📊 Position: {pos*100:.0f}% Top 60%\n📍 Entry: {entry:.4f} (+2% Above HIGH)\n🛑 SL: {sl:.4f} (+3%)\n\n🎯 TP1: {tp1:.4f} (-2% Below LOW)\n🎯 TP2: {tp2:.4f} (-4%)\n🎯 TP3: {tp3:.4f} (-7%)\n\n💎 SUNNY VIP V3.1"
+                sent_today.add(f"{coin}_SHORT")
 
-                # === YOUR REQUEST: SHORT FROM +2% ABOVE HIGH ===
-                elif pos > 0.75:
-                    entry = hi * 1.02      # +2% ABOVE HIGH
-                    sl = entry * 1.03      # +3% SL
-                    tp1 = lo * 0.98        # -2% BELOW LOW (YOUR REQUEST!)
-                    tp2 = lo * 0.96        # -4% BELOW LOW
-                    tp3 = lo * 0.93        # -7% Runner
+            if signal:
+                send_msg(signal)
+                print(f"SIGNAL SENT {coin}")
+                time.sleep(2)
 
-                    msg=f"🔴 SHORT BREAKOUT #{coin}\n\n📍 Entry: {entry:.4f}\n   ↳ +2% Above 24h HIGH ({hi:.4f})\n🛑 SL: {sl:.4f} (+3%)\n\n🎯 TP1: {tp1:.4f} (-2% Below LOW)\n🎯 TP2: {tp2:.4f} (-4% Below LOW)\n🎯 TP3: {tp3:.4f} (-7% Runner)\n\n📊 Context:\nLOW: {lo:.4f} | HIGH: {hi:.4f}\nNow: {p:.4f} [{b}] {pos*100:.0f}% TOP\n💡 Fakeout Short Setup!\n\n⏰ {dj()}\n💎 SUNNY VIP V3"
-                    send(msg)
-                    time.sleep(20)
+        # HEARTBEAT EVERY 1 HOUR
+        if scanned % 35 == 0:
+            loops = scanned // 35
+            if loops % 20 == 0: # every ~60 min
+                send_msg(f"💓 <b>V3.1 ALIVE {time_str}</b>\n📊 Scanned {scanned} coins\n🎯 Filter 40/60 Waiting -2% / +2%\n💎 SUNNY VIP V3.1")
+                # reset daily
+                if now_dj.hour == 0:
+                    sent_today.clear()
+                    scanned = 0
 
-            except Exception as e:
-                print(e,flush=True)
-        time.sleep(180)
+        time.sleep(180) # scan every 3 min
 
-@app.route('/')
-def home():
-    return f"SUNNY VIP V3 BREAKOUT LIVE {dj()} - Entry -2% / +2% Mode"
-
-Thread(target=loop,daemon=True).start()
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+    except Exception as e:
+        print(f"Error {e}")
+        time.sleep(60)
